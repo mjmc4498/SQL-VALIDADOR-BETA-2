@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Validador SQL Avanzado — BigQuery (GCP)</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="app-shell">
+
+      <!-- MAIN -->
+      <div class="main-card">
+        <div class="card p-3 p-md-4">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3 flex-column flex-md-row">
+              <div>
+                <h3 class="card-title mb-1">Generador Avanzado de Validaciones SQL — BigQuery (GCP)</h3>
+                <p class="mb-0 text-muted">Selecciona validaciones, completa los metadatos de proyecto/dataset/tabla y genera SQL listo para ejecutar o exportar.</p>
+              </div>
+              <div class="mt-3 mt-md-0">
+                <div class="btn-group">
+                  <button id="openDrawerBtn" class="btn btn-outline-primary">Ver detalle de validaciones</button>
+                </div>
+              </div>
+            </div>
+
+            <form id="validatorForm" onsubmit="event.preventDefault(); generateSQL();">
+              <div class="row g-3">
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Proyecto (GCP)</label>
+                  <input id="project" class="form-control" placeholder="mi-proyecto" required>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Dataset</label>
+                  <input id="dataset" class="form-control" placeholder="mi_dataset" required>
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Tabla Fuente</label>
+                  <input id="tableSource" class="form-control" placeholder="tabla_origen" required>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Tabla Destino (para comparación)</label>
+                  <input id="tableDest" class="form-control" placeholder="tabla_destino (opcional)">
+                </div>
+
+                <div class="col-12">
+                  <label class="form-label">Campos a comparar / validar <small class="text-muted">(separados por coma)</small></label>
+                  <input id="fields" class="form-control" placeholder="id_persona, nombre, fecha_nacimiento">
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Filtro Global (WHERE)</label>
+                  <input id="filter" class="form-control" placeholder="estado = 'ACTIVO' AND fecha >= '2025-01-01'">
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Encabezado Esperado (para Formato)</label>
+                  <input id="expectedHeader" class="form-control" placeholder="id_persona,nombre,fecha_nacimiento">
+                </div>
+
+                <!-- CHECKLIST POR CATEGORIAS -->
+                <div class="col-12">
+                  <label class="form-label">Validaciones</label>
+
+                  <div class="card p-3 border-0 mb-2">
+                    <div class="row gy-2">
+                      <div class="col-12">
+                        <div class="fw-semibold">Estructura y Metadatos</div>
+                      </div>
+
+                      <div class="col-12">
+                        <div class="checkbox-container">
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_exists" data-key="exists"><label class="form-check-label" for="chk_exists">Verificar existencia de tabla</label></div>
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_headers" data-key="headers"><label class="form-check-label" for="chk_headers">Validar cabeceras de columna</label></div>
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_types" data-key="types"><label class="form-check-label" for="chk_types">Verificar tipos de datos</label></div>
+                        </div>
+                      </div>
+
+                      <div class="col-12 mt-2">
+                        <div class="fw-semibold">Integridad de Datos</div>
+                      </div>
+                      <div class="col-12">
+                        <div class="checkbox-container">
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_count" data-key="count" checked><label class="form-check-label" for="chk_count">Conteo total de registros</label></div>
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_nulls" data-key="nulls"><label class="form-check-label" for="chk_nulls">Verificar valores nulos</label></div>
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_duplicates" data-key="duplicates"><label class="form-check-label" for="chk_duplicates">Detectar duplicados</label></div>
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_diff" data-key="diff"><label class="form-check-label" for="chk_diff">Verificar valores diferentes</label></div>
+                        </div>
+                      </div>
+
+                      <div class="col-12 mt-2">
+                        <div class="fw-semibold">Otras Validaciones Avanzadas</div>
+                      </div>
+                      <div class="col-12">
+                        <div class="checkbox-container">
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_uniqueness" data-key="uniqueness"><label class="form-check-label" for="chk_uniqueness">Unicidad (campos seleccionados)</label></div>
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_recon" data-key="recon"><label class="form-check-label" for="chk_recon">Reconciliación Numérica</label></div>
+                          <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_tol" data-key="tol"><label class="form-check-label" for="chk_tol">Tolerancia (%)</label></div>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Campo numérico (reconciliación)</label>
+                  <input id="numericField" class="form-control" placeholder="monto_total">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Campo clave (agrupación)</label>
+                  <input id="keyField" class="form-control" placeholder="id_poliza">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Tolerancia (%)</label>
+                  <input id="tolerance" type="number" step="0.01" class="form-control" placeholder="0.5">
+                </div>
+
+                <div class="col-12 d-grid gap-2 d-md-flex justify-content-md-end mt-2">
+                  <button class="btn btn-primary" type="submit">Generar SQL Avanzado</button>
+                  <button class="btn btn-outline-secondary" type="button" onclick="clearOutput()">Limpiar</button>
+                </div>
+
+              </div>
+            </form>
+
+            <hr>
+
+            <div>
+              <h5 class="section-title">SQL Generado</h5>
+              <pre id="sqlArea" class="sql-output">-- Aquí aparecerán los SQL generados</pre>
+
+              <div class="mt-3 d-flex flex-wrap gap-2 export-group">
+                <button class="btn btn-success btn-sm" onclick="copySQL()">Copiar SQL</button>
+                <button class="btn btn-secondary btn-sm" onclick="downloadSQLFile()">Descargar .sql</button>
+                <button class="btn btn-outline-primary btn-sm" onclick="exportCSV()">Exportar CSV</button>
+                <button class="btn btn-outline-primary btn-sm" onclick="exportTXT()">Exportar TXT</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- DRAWER / PANEL LATERAL -->
+      <div id="drawer" class="drawer">
+        <div class="card p-3">
+          <div class="card-body d-flex flex-column">
+            <div class="d-flex justify-content-between align-items-center mb-2 search">
+              <h5 class="mb-0">Detalle de validaciones</h5>
+              <div>
+                <button id="closeDrawerBtn" class="btn btn-sm btn-outline-secondary">Cerrar</button>
+              </div>
+            </div>
+
+            <div class="mb-2">
+              <input id="searchValidation" class="form-control" placeholder="Buscar validación...">
+            </div>
+
+            <div id="validationList" class="list-group mb-3">
+              <!-- items in JS -->
+            </div>
+
+            <div class="mt-auto text-muted small">Haz clic en "Insertar" para activar la validación en el formulario.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="js/main.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

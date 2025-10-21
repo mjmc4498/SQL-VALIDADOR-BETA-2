@@ -1,0 +1,51 @@
+:root{
+      --bg-grad-start:#eef2f3; --bg-grad-end:#dfe9f3; --primary-600:#0d6efd; --card-shadow: 0 6px 25px rgba(0,0,0,0.10);
+    }
+    html,body{height:100%;}
+    body {
+      padding: 18px;
+      background: linear-gradient(135deg,var(--bg-grad-start) 0%, var(--bg-grad-end) 100%);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      color: #25303b;
+    }
+
+    /* Layout */
+    .app-shell{display:flex; gap:16px; align-items:flex-start;}
+    .main-card{flex:1;}
+
+    .card {
+      border-radius: 12px;
+      box-shadow: 0 4px 18px rgba(8,24,48,0.06);
+      border: none;
+      transition: transform 160ms ease, box-shadow 160ms ease;
+    }
+    .card:hover{transform:translateY(-4px); box-shadow: var(--card-shadow);}
+
+    h3.card-title{color:#073763; font-weight:700;}
+    label.form-label{font-weight:600; color:#243447;}
+
+    .form-control{border-radius:8px; border:1px solid #d0d7df;}
+    .form-control:focus{box-shadow:0 0 0 .18rem rgba(13,110,253,0.12); border-color:var(--primary-600);}
+
+    .checkbox-container{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:0.5rem 1rem;}
+
+    pre.sql-output{background:#07121a; color:#e6eef6; padding:14px; border-radius:10px; font-size:0.88rem; overflow:auto;}
+
+    .section-title{font-weight:700; color:var(--primary-600); border-bottom:2px solid rgba(13,110,253,0.12); padding-bottom:6px; display:inline-block;}
+
+    /* Sidebar drawer */
+    .drawer{width:420px; max-width:92vw; position:fixed; right:18px; top:18px; bottom:18px; transform:translateX(110%); transition:transform .22s ease; z-index:1200;}
+    .drawer.open{transform:translateX(0);}
+    .drawer .card{height:100%; overflow:auto;}
+    .drawer .search{position:sticky; top:0; background:transparent; padding-top:12px; z-index:2}
+
+    /* Export buttons grouping */
+    .export-group{display:flex; gap:8px; flex-wrap:wrap;}
+    .export-group .btn{white-space:nowrap}
+
+    /* Responsive tweaks */
+    @media (max-width: 992px){
+      .app-shell{flex-direction:column;}
+      .drawer{position:fixed; right:8px; left:8px; bottom:8px; top:auto; height:50vh; transform:translateY(110%);}
+      .drawer.open{transform:translateY(0);}
+    }
