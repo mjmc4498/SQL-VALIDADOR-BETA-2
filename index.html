@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Validador SQL Avanzado — BigQuery (GCP)</title>
+  <title>Generador Avanzado de Validaciones de Datos</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -233,8 +233,8 @@ pre.sql-output {
           <div class="card-body">
             <div class="d-flex justify-content-between align-items-start mb-3 flex-column flex-md-row">
               <div>
-                <h3 class="card-title mb-1">Generador Avanzado de Validaciones SQL — BigQuery (GCP)</h3>
-                <p class="mb-0 text-muted">Selecciona validaciones, completa los metadatos de proyecto/dataset/tabla y genera SQL listo para ejecutar o exportar.</p>
+                <h3 class="card-title mb-1">Generador Avanzado de Validaciones de Datos</h3>
+                <p class="mb-0 text-muted">Selecciona el motor de BD, las validaciones, completa los metadatos y genera scripts listos para ejecutar.</p>
               </div>
               <div class="mt-3 mt-md-0">
                 <div class="btn-group">
@@ -243,23 +243,34 @@ pre.sql-output {
               </div>
             </div>
 
-            <form id="validatorForm" onsubmit="event.preventDefault(); generateSQL();">
+            <form id="validatorForm" onsubmit="event.preventDefault(); generateScript();">
               <div class="row g-3">
+                <div class="col-12">
+                  <label for="dbEngine" class="form-label">Motor de Base de Datos</label>
+                  <select id="dbEngine" class="form-select">
+                    <option value="bigquery" selected>BigQuery (GCP)</option>
+                    <option value="postgres">PostgreSQL</option>
+                    <option value="sqlserver">Microsoft SQL Server / Azure</option>
+                    <option value="mysql">MySQL</option>
+                    <option value="mongodb">MongoDB</option>
+                  </select>
+                </div>
+
                 <div class="col-12 col-md-6">
-                  <label class="form-label">Proyecto (GCP)</label>
-                  <input id="project" class="form-control" placeholder="mi-proyecto" required>
+                  <label class="form-label" id="projectLabel">Proyecto (GCP)</label>
+                  <input id="project" class="form-control" placeholder="mi-proyecto-gcp" required>
                 </div>
                 <div class="col-12 col-md-6">
-                  <label class="form-label">Dataset</label>
+                  <label class="form-label" id="datasetLabel">Dataset / Schema</label>
                   <input id="dataset" class="form-control" placeholder="mi_dataset" required>
                 </div>
 
                 <div class="col-12 col-md-6">
-                  <label class="form-label">Tabla Fuente</label>
+                  <label class="form-label">Tabla / Colección Fuente</label>
                   <input id="tableSource" class="form-control" placeholder="tabla_origen" required>
                 </div>
                 <div class="col-12 col-md-6">
-                  <label class="form-label">Tabla Destino (para comparación)</label>
+                  <label class="form-label">Tabla / Colección Destino</label>
                   <input id="tableDest" class="form-control" placeholder="tabla_destino (opcional)">
                 </div>
 
@@ -383,51 +394,16 @@ pre.sql-output {
 <script>
 // --- VALIDATION METADATA ---
 const VALIDATIONS = [
-  { key:'exists', title:'Verificar existencia de tabla', category:'Estructura y Metadatos', desc:'Verifica que la tabla exista dentro del dataset.', purpose:'Evitar errores posteriores por tablas faltantes.', criteria:["Tabla presente en INFORMATION_SCHEMA"], sqlTemplate: (p,d,t)=>`SELECT table_name FROM \`${p}.${d}\`.INFORMATION_SCHEMA.TABLES WHERE table_name='${t}';` },
-  { key:'headers', title:'Validar cabeceras de columna', category:'Estructura y Metadatos', desc:'Compara las cabeceras reales con las esperadas (orden y nombres).', purpose:'Asegurar formato y orden de columnas en reportes/ingestas.', criteria:['Igualdad en número y nombre de columnas','Mismo orden'], sqlTemplate:(p,d,t,expected)=>{
-      const exp = (expected||'').split(',').map(s=>`'${s.trim()}'`).join(', ');
-      return `WITH cols AS (SELECT ARRAY_AGG(column_name ORDER BY ordinal_position) cols FROM \`${p}.${d}\`.INFORMATION_SCHEMA.COLUMNS WHERE table_name='${t}')\nSELECT IF(TO_JSON_STRING(cols)=TO_JSON_STRING([${exp}]), 'OK','MISMATCH') AS resultado, cols FROM cols;`;
-  }},
-  { key:'types', title:'Verificar tipos de datos', category:'Estructura y Metadatos', desc:'Valida que los tipos de columnas coincidan con los esperados.', purpose:'Garantizar compatibilidad de tipos entre procesos.', criteria:['Comparar data_type en INFORMATION_SCHEMA','Reportar discrepancias'], sqlTemplate:(p,d,t)=>`SELECT column_name, data_type FROM \`${p}.${d}\`.INFORMATION_SCHEMA.COLUMNS WHERE table_name='${t}' ORDER BY ordinal_position;` },
-
-  { key:'count', title:'Conteo total de registros', category:'Integridad de Datos', desc:'Cuenta registros en fuente y destino para comparar.', purpose:'Detectar pérdidas o duplicados globales.', criteria:['Conteo por tabla'], sqlTemplate:(p,d,src,dest,filter)=> {
-      const f = filter?`WHERE ${filter}`:'';
-      let q = `SELECT '${src}' AS tabla, COUNT(*) AS total FROM \`${p}.${d}.${src}\` ${f}`;
-      if(dest) q += `\nUNION ALL\nSELECT '${dest}' AS tabla, COUNT(*) AS total FROM \`${p}.${d}.${dest}\``;
-      return q; }
-  },
-
-  { key:'nulls', title:'Verificar valores nulos', category:'Integridad de Datos', desc:'Cuenta valores NULL por campo.', purpose:'Medir calidad y completitud por campo.', criteria:['COUNTIF(field IS NULL)'], sqlTemplate:(p,d,t,fields,filter)=>{
-      const f = filter?`WHERE ${filter}`:'';
-      const flds = (fields||[]).map(fld=>`COUNTIF(${fld} IS NULL) AS null_count_${fld}`).join(',\n       ');
-      return flds ? `SELECT ${flds}\nFROM \`${p}.${d}.${t}\` ${f};` : `-- No se especificaron campos para nulidad.`;
-  }},
-
-  { key:'duplicates', title:'Detectar duplicados', category:'Integridad de Datos', desc:'Encuentra valores duplicados en los campos indicados.', purpose:'Evitar inconsistencias por duplicidad de llaves o identificadores.', criteria:['GROUP BY + HAVING COUNT>1'], sqlTemplate:(p,d,t,fields,filter)=>{
-      return (fields||[]).map(f=>`SELECT ${f} AS valor, COUNT(*) AS cnt FROM \`${p}.${d}.${t}\` ${filter?`WHERE ${filter}`:''} GROUP BY ${f} HAVING COUNT(*)>1;`).join('\n\n') || `-- No se especificaron campos para detectar duplicados.`;
-  }},
-
-  { key:'diff', title:'Verificar valores diferentes', category:'Integridad de Datos', desc:'Compara campo a campo entre fuente y destino para detectar diferencias.', purpose:'Asegurar que la carga/transformación preserve valores.', criteria:['EXCEPT DISTINCT entre conjuntos de campos'], sqlTemplate:(p,d,src,dest,fields,filter)=>{
-      const fl = (fields||[]).join(', ') || '*';
-      const f = filter?`WHERE ${filter}`:'';
-      return `-- En fuente pero no en destino\nSELECT ${fl} FROM \`${p}.${d}.${src}\` ${f}\nEXCEPT DISTINCT\nSELECT ${fl} FROM \`${p}.${d}.${dest}\`;\n\n-- En destino pero no en fuente\nSELECT ${fl} FROM \`${p}.${d}.${dest}\`\nEXCEPT DISTINCT\nSELECT ${fl} FROM \`${p}.${d}.${src}\` ${f};`;
-  }},
-
-  { key:'uniqueness', title:'Unicidad (campos seleccionados)', category:'Otras Validaciones Avanzadas', desc:'Verifica que los campos definidos como únicos no tengan duplicados.', purpose:'Integridad de identificadores y llaves primarias.', criteria:['GROUP BY campo HAVING COUNT>1'], sqlTemplate:(p,d,t,fields,filter)=>{
-      return (fields||[]).map(f=>`SELECT ${f}, COUNT(*) cnt FROM \`${p}.${d}.${t}\` ${filter?`WHERE ${filter}`:''} GROUP BY ${f} HAVING COUNT(*)>1;`).join('\n\n') || `-- No se especificaron campos para unicidad.`;
-  }},
-
-  { key:'recon', title:'Reconciliación Numérica', category:'Otras Validaciones Avanzadas', desc:'Compara sumas agregadas por clave entre fuente y destino.', purpose:'Detectar diferencias numéricas por agrupación.', criteria:['SUM por agrupación y FULL JOIN'], sqlTemplate:(p,d,src,dest,keyField,numericField,filter)=>{
-      if(!keyField||!numericField) return `-- Reconciliación requiere campo clave y campo numérico.`;
-      const f = filter?`WHERE ${filter}`:'';
-      return `WITH src AS (SELECT ${keyField}, SUM(${numericField}) AS total FROM \`${p}.${d}.${src}\` ${f} GROUP BY ${keyField}),\n     dest AS (SELECT ${keyField}, SUM(${numericField}) AS total FROM \`${p}.${d}.${dest}\` GROUP BY ${keyField})\nSELECT s.${keyField}, s.total AS total_src, d.total AS total_dest, (s.total - d.total) AS diferencia\nFROM src s FULL JOIN dest d USING(${keyField})\nWHERE COALESCE(s.total,0) != COALESCE(d.total,0);`;
-  }},
-
-  { key:'tol', title:'Tolerancia (%)', category:'Otras Validaciones Avanzadas', desc:'Retorna filas donde la diferencia porcentual supera un umbral.', purpose:'Permitir variaciones aceptables en reconciliación.', criteria:['SAFE_DIVIDE(|src-dest|,dest)*100 > tol'], sqlTemplate:(p,d,src,dest,keyField,numericField,tol,filter)=>{
-      if(!keyField||!numericField) return `-- Tolerancia requiere campo clave y campo numérico.`;
-      const f = filter?`AND ${filter}`:'';
-      return `WITH comp AS (\n  SELECT s.${keyField} AS key_val, s.${numericField} AS src_val, d.${numericField} AS dest_val, SAFE_DIVIDE(ABS(s.${numericField}-d.${numericField}), NULLIF(d.${numericField},0))*100 AS diff_pct\n  FROM \`${p}.${d}.${src}\` s\n  JOIN \`${p}.${d}.${dest}\` d USING(${keyField})\n  WHERE TRUE ${f}\n)\nSELECT * FROM comp WHERE diff_pct > ${tol};`;
-  }},
+  { key: 'exists', title: 'Verificar existencia de tabla', category: 'Estructura y Metadatos', desc: 'Verifica que la tabla exista dentro del dataset.', purpose: 'Evitar errores posteriores por tablas faltantes.', criteria: ["Tabla presente en INFORMATION_SCHEMA"] },
+  { key: 'headers', title: 'Validar cabeceras de columna', category: 'Estructura y Metadatos', desc: 'Compara las cabeceras reales con las esperadas (orden y nombres).', purpose: 'Asegurar formato y orden de columnas en reportes/ingestas.', criteria: ['Igualdad en número y nombre de columnas', 'Mismo orden'] },
+  { key: 'types', title: 'Verificar tipos de datos', category: 'Estructura y Metadatos', desc: 'Valida que los tipos de columnas coincidan con los esperados.', purpose: 'Garantizar compatibilidad de tipos entre procesos.', criteria: ['Comparar data_type en INFORMATION_SCHEMA', 'Reportar discrepancias'] },
+  { key: 'count', title: 'Conteo total de registros', category: 'Integridad de Datos', desc: 'Cuenta registros en fuente y destino para comparar.', purpose: 'Detectar pérdidas o duplicados globales.', criteria: ['Conteo por tabla'] },
+  { key: 'nulls', title: 'Verificar valores nulos', category: 'Integridad de Datos', desc: 'Cuenta valores NULL por campo.', purpose: 'Medir calidad y completitud por campo.', criteria: ['COUNTIF(field IS NULL)'] },
+  { key: 'duplicates', title: 'Detectar duplicados', category: 'Integridad de Datos', desc: 'Encuentra valores duplicados en los campos indicados.', purpose: 'Evitar inconsistencias por duplicidad de llaves o identificadores.', criteria: ['GROUP BY + HAVING COUNT>1'] },
+  { key: 'diff', title: 'Verificar valores diferentes', category: 'Integridad de Datos', desc: 'Compara campo a campo entre fuente y destino para detectar diferencias.', purpose: 'Asegurar que la carga/transformación preserve valores.', criteria: ['EXCEPT DISTINCT entre conjuntos de campos'] },
+  { key: 'uniqueness', title: 'Unicidad (campos seleccionados)', category: 'Otras Validaciones Avanzadas', desc: 'Verifica que los campos definidos como únicos no tengan duplicados.', purpose: 'Integridad de identificadores y llaves primarias.', criteria: ['GROUP BY campo HAVING COUNT>1'] },
+  { key: 'recon', title: 'Reconciliación Numérica', category: 'Otras Validaciones Avanzadas', desc: 'Compara sumas agregadas por clave entre fuente y destino.', purpose: 'Detectar diferencias numéricas por agrupación.', criteria: ['SUM por agrupación y FULL JOIN'] },
+  { key: 'tol', title: 'Tolerancia (%)', category: 'Otras Validaciones Avanzadas', desc: 'Retorna filas donde la diferencia porcentual supera un umbral.', purpose: 'Permitir variaciones aceptables en reconciliación.', criteria: ['SAFE_DIVIDE(|src-dest|,dest)*100 > tol'] },
 ];
 
 // --- UI: populate drawer ---
@@ -475,8 +451,8 @@ validationListEl.addEventListener('click', (e)=>{
     if(chk){ chk.checked = true; chk.scrollIntoView({behavior:'smooth', block:'center'}); }
   } else if(action==='preview'){
     // build SQL preview using current form values
-    const sql = buildSQLForValidation(v.key);
-    const prev = `-- SQL (previsualización) para: ${v.title}\n\n${sql}`;
+    const sql = buildQueryForValidation(v.key);
+    const prev = `-- Script (previsualización) para: ${v.title}\n\n${sql}`;
     document.getElementById('sqlArea').textContent = prev;
     drawer.classList.add('open');
   }
@@ -485,6 +461,7 @@ validationListEl.addEventListener('click', (e)=>{
 // Helper: get form values
 function getFormValues(){
   return {
+    engine: document.getElementById('dbEngine').value,
     project: document.getElementById('project').value.trim(),
     dataset: document.getElementById('dataset').value.trim(),
     src: document.getElementById('tableSource').value.trim(),
@@ -498,45 +475,301 @@ function getFormValues(){
   };
 }
 
-// Build SQL per validation
-function buildSQLForValidation(key){
+// --- QUERY GENERATION ---
+
+// Main dispatcher
+function buildQueryForValidation(key) {
   const f = getFormValues();
-  const v = VALIDATIONS.find(x=>x.key===key);
-  if(!v) return `-- Validación no encontrada: ${key}`;
-  try{
-    switch(key){
-      case 'exists': return v.sqlTemplate(f.project,f.dataset,f.src);
-      case 'headers': return v.sqlTemplate(f.project,f.dataset,f.src,f.expectedHeader);
-      case 'types': return v.sqlTemplate(f.project,f.dataset,f.src);
-      case 'count': return v.sqlTemplate(f.project,f.dataset,f.src,f.dest,f.filter);
-      case 'nulls': return v.sqlTemplate(f.project,f.dataset,f.src,f.fields,f.filter);
-      case 'duplicates': return v.sqlTemplate(f.project,f.dataset,f.src,f.fields,f.filter);
-      case 'diff': return v.sqlTemplate(f.project,f.dataset,f.src,f.dest,f.fields,f.filter);
-      case 'uniqueness': return v.sqlTemplate(f.project,f.dataset,f.src,f.fields,f.filter);
-      case 'recon': return v.sqlTemplate(f.project,f.dataset,f.src,f.dest,f.keyField,f.numericField,f.filter);
-      case 'tol': return v.sqlTemplate(f.project,f.dataset,f.src,f.dest,f.keyField,f.numericField,f.tolerance,f.filter);
-      default: return `-- Plantilla no implementada para: ${key}`;
+  const v = VALIDATIONS.find(x => x.key === key);
+  if (!v) return `-- Validación no encontrada: ${key}`;
+
+  try {
+    switch (f.engine) {
+      case 'bigquery':
+        return generateBigQueryValidation(key, f, v);
+      case 'postgres':
+        return generatePostgresValidation(key, f, v);
+      case 'sqlserver':
+        return generateSqlServerValidation(key, f, v);
+      case 'mysql':
+        return generateMySqlValidation(key, f, v);
+      case 'mongodb':
+        return generateMongoDbValidation(key, f, v);
+      default:
+        return `-- Motor de base de datos no soportado: ${f.engine}`;
     }
-  }catch(err){return `-- Error generando SQL: ${err.message}`;}
+  } catch (err) {
+    return `-- Error generando el script: ${err.message}`;
+  }
 }
 
-// Generate overall SQL based on checked validations
-function generateSQL(){
-  const project = document.getElementById('project').value.trim();
-  const dataset = document.getElementById('dataset').value.trim();
-  const src = document.getElementById('tableSource').value.trim();
-  if(!project||!dataset||!src){ alert('Proyecto, dataset y tabla fuente son obligatorios.'); return; }
+// Generator for BigQuery
+function generateBigQueryValidation(key, f, v) {
+  const src = `\`${f.project}.${f.dataset}.${f.src}\``;
+  const dest = f.dest ? `\`${f.project}.${f.dataset}.${f.dest}\`` : null;
+  const where = f.filter ? `WHERE ${f.filter}` : '';
+
+  switch(key){
+    case 'exists':
+      return `SELECT table_name FROM \`${f.project}.${f.dataset}\`.INFORMATION_SCHEMA.TABLES WHERE table_name='${f.src}';`;
+    case 'headers': {
+      const exp = (f.expectedHeader||'').split(',').map(s=>`'${s.trim()}'`).join(', ');
+      return `WITH cols AS (SELECT ARRAY_AGG(column_name ORDER BY ordinal_position) cols FROM \`${f.project}.${f.dataset}\`.INFORMATION_SCHEMA.COLUMNS WHERE table_name='${f.src}')\nSELECT IF(TO_JSON_STRING(cols)=TO_JSON_STRING([${exp}]), 'OK','MISMATCH') AS resultado, cols FROM cols;`;
+    }
+    case 'types':
+      return `SELECT column_name, data_type FROM \`${f.project}.${f.dataset}\`.INFORMATION_SCHEMA.COLUMNS WHERE table_name='${f.src}' ORDER BY ordinal_position;`;
+    case 'count': {
+      let q = `SELECT '${f.src}' AS tabla, COUNT(*) AS total FROM ${src} ${where}`;
+      if(dest) q += `\nUNION ALL\nSELECT '${f.dest}' AS tabla, COUNT(*) AS total FROM ${dest} ${where}`;
+      return q;
+    }
+    case 'nulls': {
+      const flds = (f.fields||[]).map(fld=>`COUNTIF(${fld} IS NULL) AS null_count_${fld}`).join(',\n       ');
+      return flds ? `SELECT ${flds}\nFROM ${src} ${where};` : `-- No se especificaron campos para nulidad.`;
+    }
+    case 'duplicates':
+      return (f.fields||[]).map(fld=>`SELECT ${fld} AS valor, COUNT(*) AS cnt FROM ${src} ${where} GROUP BY ${fld} HAVING COUNT(*)>1;`).join('\n\n') || `-- No se especificaron campos para detectar duplicados.`;
+    case 'diff': {
+      const fl = (f.fields||[]).join(', ') || '*';
+      if(!dest) return '-- La validación de diferencias requiere una tabla de destino.';
+      return `-- En fuente pero no en destino\nSELECT ${fl} FROM ${src} ${where}\nEXCEPT DISTINCT\nSELECT ${fl} FROM ${dest} ${where};\n\n-- En destino pero no en fuente\nSELECT ${fl} FROM ${dest} ${where}\nEXCEPT DISTINCT\nSELECT ${fl} FROM ${src} ${where};`;
+    }
+    case 'uniqueness':
+        return (f.fields||[]).map(fld=>`SELECT ${fld}, COUNT(*) cnt FROM ${src} ${where} GROUP BY ${fld} HAVING COUNT(*)>1;`).join('\n\n') || `-- No se especificaron campos para unicidad.`;
+    case 'recon': {
+      if(!f.keyField||!f.numericField) return `-- Reconciliación requiere campo clave y campo numérico.`;
+      if(!dest) return '-- La reconciliación requiere una tabla de destino.';
+      return `WITH src_agg AS (SELECT ${f.keyField}, SUM(${f.numericField}) AS total FROM ${src} ${where} GROUP BY ${f.keyField}),\n     dest_agg AS (SELECT ${f.keyField}, SUM(${f.numericField}) AS total FROM ${dest} ${where} GROUP BY ${f.keyField})\nSELECT s.${f.keyField}, s.total AS total_src, d.total AS total_dest, (s.total - d.total) AS diferencia\nFROM src_agg s FULL JOIN dest_agg d USING(${f.keyField})\nWHERE COALESCE(s.total,0) != COALESCE(d.total,0);`;
+    }
+    case 'tol': {
+      if(!f.keyField||!f.numericField) return `-- Tolerancia requiere campo clave y campo numérico.`;
+      if(!dest) return '-- La validación de tolerancia requiere una tabla de destino.';
+      return `WITH comp AS (\n  SELECT s.${f.keyField} AS key_val, s.${f.numericField} AS src_val, d.${f.numericField} AS dest_val, SAFE_DIVIDE(ABS(s.${f.numericField}-d.${f.numericField}), NULLIF(d.${f.numericField},0))*100 AS diff_pct\n  FROM ${src} s\n  JOIN ${dest} d USING(${f.keyField})\n  ${where}\n)\nSELECT * FROM comp WHERE diff_pct > ${f.tolerance};`;
+    }
+    default: return `-- Plantilla no implementada para: ${key}`;
+  }
+}
+
+// Generator for PostgreSQL
+function generatePostgresValidation(key, f, v) {
+  // Helper to quote identifiers. Postgres uses "schema"."table".
+  const quote = (name) => `"${name}"`;
+  const src = f.dataset ? `${quote(f.dataset)}.${quote(f.src)}` : quote(f.src);
+  const dest = f.dest ? (f.dataset ? `${quote(f.dataset)}.${quote(f.dest)}` : quote(f.dest)) : null;
+  const where = f.filter ? `WHERE ${f.filter}` : '';
+
+  switch (key) {
+    case 'exists':
+      return `SELECT table_name FROM information_schema.tables WHERE table_schema = '${f.dataset || 'public'}' AND table_name = '${f.src}';`;
+    case 'headers': {
+      const exp = (f.expectedHeader || '').split(',').map(s => `'${s.trim()}'`).join(', ');
+      return `WITH cols AS (\n  SELECT STRING_AGG(column_name, ',' ORDER BY ordinal_position) as columns_str\n  FROM information_schema.columns\n  WHERE table_schema = '${f.dataset || 'public'}' AND table_name = '${f.src}'\n)\nSELECT\n  '${f.expectedHeader}' AS expected,\n  columns_str AS actual,\n  CASE WHEN columns_str = '${f.expectedHeader}' THEN 'OK' ELSE 'MISMATCH' END AS status\nFROM cols;`;
+    }
+    case 'types':
+      return `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '${f.dataset || 'public'}' AND table_name = '${f.src}' ORDER BY ordinal_position;`;
+    case 'count': {
+      let q = `SELECT '${f.src}' AS table_name, COUNT(*) AS total_rows FROM ${src} ${where}`;
+      if (dest) q += `\nUNION ALL\nSELECT '${f.dest}' AS table_name, COUNT(*) AS total_rows FROM ${dest} ${where}`;
+      return q + ';';
+    }
+    case 'nulls': {
+      const flds = (f.fields || []).map(fld => `COUNT(*) FILTER (WHERE ${quote(fld)} IS NULL) AS null_count_${fld}`).join(',\n       ');
+      return flds ? `SELECT ${flds}\nFROM ${src} ${where};` : '-- No se especificaron campos para la validación de nulos.';
+    }
+    case 'duplicates':
+      return (f.fields || []).map(fld => `SELECT ${quote(fld)} AS value, COUNT(*) AS count FROM ${src} ${where} GROUP BY ${quote(fld)} HAVING COUNT(*) > 1;`).join('\n\n') || '-- No se especificaron campos para detectar duplicados.';
+    case 'diff': {
+      const fl = (f.fields || []).map(quote).join(', ') || '*';
+       if(!dest) return '-- La validación de diferencias requiere una tabla de destino.';
+      return `-- Filas en ${f.src} pero no en ${f.dest}\n(SELECT ${fl} FROM ${src} ${where})\nEXCEPT\n(SELECT ${fl} FROM ${dest} ${where});\n\n-- Filas en ${f.dest} pero no en ${f.src}\n(SELECT ${fl} FROM ${dest} ${where})\nEXCEPT\n(SELECT ${fl} FROM ${src} ${where});`;
+    }
+    case 'uniqueness':
+      return (f.fields || []).map(fld => `SELECT ${quote(fld)}, COUNT(*) FROM ${src} ${where} GROUP BY ${quote(fld)} HAVING COUNT(*) > 1;`).join('\n\n') || '-- No se especificaron campos para la validación de unicidad.';
+    case 'recon': {
+      if (!f.keyField || !f.numericField) return '-- La reconciliación numérica requiere un campo clave y un campo numérico.';
+      if(!dest) return '-- La reconciliación numérica requiere una tabla de destino.';
+      const key = quote(f.keyField); const num = quote(f.numericField);
+      return `WITH src_agg AS (\n  SELECT ${key}, SUM(${num}) AS total FROM ${src} ${where} GROUP BY ${key}\n), dest_agg AS (\n  SELECT ${key}, SUM(${num}) AS total FROM ${dest} ${where} GROUP BY ${key}\n)\nSELECT\n  COALESCE(s.${key}, d.${key}) AS key,\n  s.total AS total_source,\n  d.total AS total_destination,\n  (COALESCE(s.total, 0) - COALESCE(d.total, 0)) AS difference\nFROM src_agg s\nFULL OUTER JOIN dest_agg d ON s.${key} = d.${key}\nWHERE COALESCE(s.total, 0) != COALESCE(d.total, 0);`;
+    }
+    case 'tol': {
+        if (!f.keyField || !f.numericField) return '-- La validación de tolerancia requiere un campo clave y un campo numérico.';
+        if (!dest) return '-- La validación de tolerancia requiere una tabla de destino.';
+        const key = quote(f.keyField); const num = quote(f.numericField);
+        return `WITH comparison AS (\n  SELECT\n    s.${key} AS key_value,\n    s.${num} AS source_value,\n    d.${num} AS dest_value,\n    ABS(s.${num} - d.${num}) / NULLIF(d.${num}, 0) * 100 AS percentage_diff\n  FROM ${src} s\n  JOIN ${dest} d ON s.${key} = d.${key}\n  ${where}\n)\nSELECT *\nFROM comparison\nWHERE percentage_diff > ${f.tolerance};`;
+    }
+    default: return `-- Validación no implementada para PostgreSQL: ${key}`;
+  }
+}
+function generateSqlServerValidation(key, f, v) {
+  // SQL Server uses [schema].[table]
+  const quote = (name) => `[${name}]`;
+  const src = f.dataset ? `${quote(f.dataset)}.${quote(f.src)}` : quote(f.src);
+  const dest = f.dest ? (f.dataset ? `${quote(f.dataset)}.${quote(f.dest)}` : quote(f.dest)) : null;
+  const where = f.filter ? `WHERE ${f.filter}` : '';
+
+  switch (key) {
+    case 'exists':
+      return `SELECT name FROM sys.tables WHERE SCHEMA_NAME(schema_id) = '${f.dataset || 'dbo'}' AND name = '${f.src}';`;
+    case 'headers': {
+        const exp = (f.expectedHeader || '').split(',').map(s => `'${s.trim()}'`).join(', ');
+        return `WITH cols AS (\n  SELECT STRING_AGG(COLUMN_NAME, ',') WITHIN GROUP (ORDER BY ORDINAL_POSITION) as columns_str\n  FROM INFORMATION_SCHEMA.COLUMNS\n  WHERE TABLE_SCHEMA = '${f.dataset || 'dbo'}' AND TABLE_NAME = '${f.src}'\n)\nSELECT\n  '${f.expectedHeader}' AS expected,\n  columns_str AS actual,\n  IIF(columns_str = '${f.expectedHeader}', 'OK', 'MISMATCH') AS status\nFROM cols;`;
+    }
+    case 'types':
+      return `SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '${f.dataset || 'dbo'}' AND TABLE_NAME = '${f.src}' ORDER BY ORDINAL_POSITION;`;
+    case 'count': {
+      let q = `SELECT '${f.src}' AS table_name, COUNT(*) AS total_rows FROM ${src} ${where}`;
+      if (dest) q += `\nUNION ALL\nSELECT '${f.dest}' AS table_name, COUNT(*) AS total_rows FROM ${dest} ${where}`;
+      return q + ';';
+    }
+    case 'nulls': {
+      const flds = (f.fields || []).map(fld => `SUM(CASE WHEN ${quote(fld)} IS NULL THEN 1 ELSE 0 END) AS null_count_${fld}`).join(',\n       ');
+      return flds ? `SELECT ${flds}\nFROM ${src} ${where};` : '-- No se especificaron campos para la validación de nulos.';
+    }
+    case 'duplicates':
+      return (f.fields || []).map(fld => `SELECT ${quote(fld)} AS value, COUNT(*) AS count FROM ${src} ${where} GROUP BY ${quote(fld)} HAVING COUNT(*) > 1;`).join('\n\n') || '-- No se especificaron campos para detectar duplicados.';
+    case 'diff': {
+      const fl = (f.fields || []).map(quote).join(', ') || '*';
+      if(!dest) return '-- La validación de diferencias requiere una tabla de destino.';
+      return `-- Filas en ${f.src} pero no en ${f.dest}\n(SELECT ${fl} FROM ${src} ${where})\nEXCEPT\n(SELECT ${fl} FROM ${dest} ${where});\n\n-- Filas en ${f.dest} pero no en ${f.src}\n(SELECT ${fl} FROM ${dest} ${where})\nEXCEPT\n(SELECT ${fl} FROM ${src} ${where});`;
+    }
+    case 'uniqueness':
+      return (f.fields || []).map(fld => `SELECT ${quote(fld)}, COUNT(*) FROM ${src} ${where} GROUP BY ${quote(fld)} HAVING COUNT(*) > 1;`).join('\n\n') || '-- No se especificaron campos para la validación de unicidad.';
+    case 'recon': {
+      if (!f.keyField || !f.numericField) return '-- La reconciliación numérica requiere un campo clave y un campo numérico.';
+      if(!dest) return '-- La reconciliación numérica requiere una tabla de destino.';
+      const key = quote(f.keyField); const num = quote(f.numericField);
+      return `WITH src_agg AS (\n  SELECT ${key}, SUM(${num}) AS total FROM ${src} ${where} GROUP BY ${key}\n), dest_agg AS (\n  SELECT ${key}, SUM(${num}) AS total FROM ${dest} ${where} GROUP BY ${key}\n)\nSELECT\n  COALESCE(s.${key}, d.${key}) AS [key],\n  s.total AS total_source,\n  d.total AS total_destination,\n  (ISNULL(s.total, 0) - ISNULL(d.total, 0)) AS difference\nFROM src_agg s\nFULL OUTER JOIN dest_agg d ON s.${key} = d.${key}\nWHERE ISNULL(s.total, 0) != ISNULL(d.total, 0);`;
+    }
+    case 'tol': {
+        if (!f.keyField || !f.numericField) return '-- La validación de tolerancia requiere un campo clave y un campo numérico.';
+        if (!dest) return '-- La validación de tolerancia requiere una tabla de destino.';
+        const key = quote(f.keyField); const num = quote(f.numericField);
+        return `WITH comparison AS (\n  SELECT\n    s.${key} AS key_value,\n    s.${num} AS source_value,\n    d.${num} AS dest_value,\n    ABS(s.${num} - d.${num}) / NULLIF(d.${num}, 0) * 100 AS percentage_diff\n  FROM ${src} s\n  JOIN ${dest} d ON s.${key} = d.${key}\n  ${where}\n)\nSELECT *\nFROM comparison\nWHERE percentage_diff > ${f.tolerance};`;
+    }
+    default: return `-- Validación no implementada para SQL Server: ${key}`;
+  }
+}
+function generateMySqlValidation(key, f, v) {
+  // MySQL uses backticks.
+  const quote = (name) => `\`${name}\``;
+  const src = f.dataset ? `${quote(f.dataset)}.${quote(f.src)}` : quote(f.src);
+  const dest = f.dest ? (f.dataset ? `${quote(f.dataset)}.${quote(f.dest)}` : quote(f.dest)) : null;
+  const where = f.filter ? `WHERE ${f.filter}` : '';
+
+  switch (key) {
+    case 'exists':
+      return `SELECT table_name FROM information_schema.tables WHERE table_schema = '${f.dataset}' AND table_name = '${f.src}';`;
+    case 'headers': {
+      return `SELECT GROUP_CONCAT(column_name ORDER BY ordinal_position SEPARATOR ',') AS columns_str\nFROM information_schema.columns\nWHERE table_schema = '${f.dataset}' AND table_name = '${f.src}';`;
+    }
+    case 'types':
+      return `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '${f.dataset}' AND table_name = '${f.src}' ORDER BY ordinal_position;`;
+    case 'count': {
+      let q = `SELECT '${f.src}' AS table_name, COUNT(*) AS total_rows FROM ${src} ${where}`;
+      if (dest) q += `\nUNION ALL\nSELECT '${f.dest}' AS table_name, COUNT(*) AS total_rows FROM ${dest} ${where}`;
+      return q + ';';
+    }
+    case 'nulls': {
+      const flds = (f.fields || []).map(fld => `SUM(CASE WHEN ${quote(fld)} IS NULL THEN 1 ELSE 0 END) AS null_count_${fld}`).join(',\n       ');
+      return flds ? `SELECT ${flds}\nFROM ${src} ${where};` : '-- No se especificaron campos para la validación de nulos.';
+    }
+    case 'duplicates':
+      return (f.fields || []).map(fld => `SELECT ${quote(fld)} AS value, COUNT(*) AS count FROM ${src} ${where} GROUP BY ${quote(fld)} HAVING COUNT(*) > 1;`).join('\n\n') || '-- No se especificaron campos para detectar duplicados.';
+    case 'diff': {
+      if (!dest) return '-- La validación de diferencias requiere una tabla de destino.';
+      if (!f.fields || f.fields.length === 0) return '-- La validación de diferencias requiere al menos un campo para comparar.';
+
+      const joinConditions = f.fields.map(field => `s.${quote(field)} = d.${quote(field)}`).join(' AND ');
+      const whereNullCheck = `d.${quote(f.fields[0])} IS NULL`; // Check if the first field of the join is null
+
+      // MySQL doesn't have EXCEPT, so we simulate it with a multi-field LEFT JOIN
+      const sourceNotInDest = `SELECT s.* FROM ${src} s LEFT JOIN ${dest} d ON ${joinConditions} ${f.filter ? `WHERE ${f.filter}` : ''} HAVING ${whereNullCheck};`;
+      const destNotInSource = `SELECT d.* FROM ${dest} d LEFT JOIN ${src} s ON ${joinConditions} ${f.filter ? `WHERE ${f.filter}` : ''} HAVING ${whereNullCheck};`;
+
+      return `-- Filas en ${f.src} pero no en ${f.dest}\n${sourceNotInDest}\n\n-- Filas en ${f.dest} pero no en ${f.src}\n${destNotInSource}`;
+    }
+    case 'uniqueness':
+      return (f.fields || []).map(fld => `SELECT ${quote(fld)}, COUNT(*) FROM ${src} ${where} GROUP BY ${quote(fld)} HAVING COUNT(*) > 1;`).join('\n\n') || '-- No se especificaron campos para la validación de unicidad.';
+    case 'recon': {
+      if (!f.keyField || !f.numericField) return '-- La reconciliación numérica requiere un campo clave y un campo numérico.';
+      if (!dest) return '-- La reconciliación numérica requiere una tabla de destino.';
+      const key = quote(f.keyField); const num = quote(f.numericField);
+      // MySQL doesn't have FULL OUTER JOIN, so we simulate it with UNION of LEFT and RIGHT JOINs.
+      return `SELECT\n  COALESCE(s.${key}, d.${key}) AS \`key\`,\n  s.total AS total_source,\n  d.total AS total_destination,\n  (COALESCE(s.total, 0) - COALESCE(d.total, 0)) AS difference\nFROM\n  (SELECT ${key}, SUM(${num}) as total FROM ${src} ${where} GROUP BY ${key}) s\nLEFT JOIN\n  (SELECT ${key}, SUM(${num}) as total FROM ${dest} ${where} GROUP BY ${key}) d ON s.${key} = d.${key}\nWHERE COALESCE(s.total, 0) != COALESCE(d.total, 0)\nUNION\nSELECT\n  COALESCE(s.${key}, d.${key}) AS \`key\`,\n  s.total AS total_source,\n  d.total AS total_destination,\n  (COALESCE(s.total, 0) - COALESCE(d.total, 0)) AS difference\nFROM\n  (SELECT ${key}, SUM(${num}) as total FROM ${src} ${where} GROUP BY ${key}) s\nRIGHT JOIN\n  (SELECT ${key}, SUM(${num}) as total FROM ${dest} ${where} GROUP BY ${key}) d ON s.${key} = d.${key}\nWHERE COALESCE(s.total, 0) != COALESCE(d.total, 0) AND s.${key} IS NULL;`;
+    }
+     case 'tol': {
+        if (!f.keyField || !f.numericField) return '-- La validación de tolerancia requiere un campo clave y un campo numérico.';
+        if (!dest) return '-- La validación de tolerancia requiere una tabla de destino.';
+        const key = quote(f.keyField); const num = quote(f.numericField);
+        return `SELECT\n  s.${key} AS key_value,\n  s.${num} AS source_value,\n  d.${num} AS dest_value,\n  ABS(s.${num} - d.${num}) / NULLIF(d.${num}, 0) * 100 AS percentage_diff\nFROM ${src} s\nJOIN ${dest} d ON s.${key} = d.${key}\n${where}\nHAVING percentage_diff > ${f.tolerance};`;
+    }
+    default: return `-- Validación no implementada para MySQL: ${key}`;
+  }
+}
+function generateMongoDbValidation(key, f, v) {
+  const src = f.src;
+  const dest = f.dest;
+  // MongoDB filters are JS objects
+  const filter = f.filter ? `, ${f.filter}` : '';
+
+  switch (key) {
+    case 'exists':
+      return `// Verifica si la colección '${src}' existe en la base de datos actual.\ndb.getCollectionNames().includes('${src}');`;
+    case 'headers': {
+        const fieldsCheck = (f.fields || []).map(field => `"${field}": { "$exists": true }`).join(', ');
+        return `// Valida que los campos esperados existan en un documento de muestra.\n// Nota: MongoDB es schema-less, esta es una aproximación.\ndb.getCollection("${src}").findOne({ ${fieldsCheck} });`;
+    }
+    case 'types':
+        return `// Muestra los tipos de datos para los campos de 100 documentos aleatorios.\ndb.getCollection('${src}').aggregate([\n  { "$sample": { "size": 100 } },\n  {\n    "$project": {\n      "field_types": {\n        "$map": {\n          "input": { "$objectToArray": "$$ROOT" },\n          "as": "field",\n          "in": { "k": "$$field.k", "v": { "$type": "$$field.v" } }\n        }\n      }\n    }\n  }\n]);`;
+    case 'count': {
+      let q = `// Conteo para la colección: ${src}\ndb.getCollection('${src}').countDocuments({}${filter});`;
+      if (dest) q += `\n\n// Conteo para la colección: ${dest}\ndb.getCollection('${dest}').countDocuments({}${filter});`;
+      return q;
+    }
+    case 'nulls': {
+        const flds = (f.fields || []).map(fld => `db.getCollection('${src}').countDocuments({ "${fld}": null }${filter}); // Nulos en ${fld}`).join('\n');
+        return flds ? `// Conteo de documentos donde el campo es null.\n${flds}` : '// No se especificaron campos para la validación de nulos.';
+    }
+    case 'duplicates':
+      return (f.fields || []).map(fld => `// Detectar duplicados en el campo: ${fld}\ndb.getCollection('${src}').aggregate([\n  { "$group": { "_id": "$${fld}", "count": { "$sum": 1 } } },\n  { "$match": { "count": { "$gt": 1 } } }\n]);`).join('\n\n') || '// No se especificaron campos para detectar duplicados.';
+    case 'diff': {
+        if (!dest) return '// La validación de diferencias requiere una colección de destino.';
+        if (!f.fields || f.fields.length === 0) return '// La validación de diferencias requiere al menos un campo para comparar.';
+
+        const letClause = f.fields.reduce((acc, field) => ({ ...acc, [`src_${field}`]: `$${field}` }), {});
+        const matchConditions = f.fields.map(field => `"$${field}": "$$src_${field}"`).join(', ');
+
+        return `// Documentos en ${src} que no están en ${dest} (basado en los campos seleccionados)\ndb.getCollection('${src}').aggregate([\n  {\n    "$lookup": {\n      "from": "${dest}",\n      "let": ${JSON.stringify(letClause)},\n      "pipeline": [\n        { "$match": { "$expr": { "$and": [ { "$eq": [ ${matchConditions} ] } ] } } }\n      ],\n      "as": "dest_docs"\n    }\n  },\n  { "$match": { "dest_docs": { "$eq": [] } } }\n]);`;
+    }
+    case 'uniqueness':
+         return (f.fields || []).map(fld => `// Validar unicidad en el campo: ${fld}\ndb.getCollection('${src}').aggregate([\n  { "$group": { "_id": "$${fld}", "count": { "$sum": 1 } } },\n  { "$match": { "count": { "$gt": 1 } } }\n]);`).join('\n\n') || '// No se especificaron campos para la validación de unicidad.';
+    case 'recon': {
+      if (!f.keyField || !f.numericField || !dest) return '// La reconciliación requiere una clave, un campo numérico y una colección de destino.';
+      return `// Paso 1: Agregar la colección fuente\ndb.getCollection('${src}').aggregate([\n  { "$group": { "_id": "$${f.keyField}", "total_source": { "$sum": "$${f.numericField}" } } },\n  { "$out": "source_agg_temp" }\n]);\n\n// Paso 2: Agregar la colección destino y unir con la fuente\ndb.getCollection('${dest}').aggregate([\n  { "$group": { "_id": "$${f.keyField}", "total_dest": { "$sum": "$${f.numericField}" } } },\n  {\n    "$lookup": {\n      "from": "source_agg_temp",\n      "localField": "_id",\n      "foreignField": "_id",\n      "as": "source_join"\n    }\n  },\n  { "$unwind": { "path": "$source_join", "preserveNullAndEmptyArrays": true } },\n  {\n    "$project": {\n      "total_dest": 1,\n      "total_source": { "$ifNull": [ "$source_join.total_source", 0 ] },\n      "difference": { "$subtract": [ { "$ifNull": [ "$source_join.total_source", 0 ] }, "$total_dest" ] }\n    }\n  },\n  { "$match": { "difference": { "$ne": 0 } } }\n]);\n\n// Limpieza\ndb.source_agg_temp.drop();`;
+    }
+    case 'tol': {
+        if (!f.keyField || !f.numericField || !dest) return '// La validación de tolerancia requiere una clave, un campo numérico y una colección de destino.';
+        return `// Comparación con tolerancia\ndb.getCollection('${src}').aggregate([\n  {\n    "$lookup": {\n      "from": "${dest}",\n      "localField": "${f.keyField}",\n      "foreignField": "${f.keyField}",\n      "as": "dest_join"\n    }\n  },\n  { "$unwind": "$dest_join" },\n  {\n    "$project": {\n      "key": "$${f.keyField}",\n      "source_value": "$${f.numericField}",\n      "dest_value": "$dest_join.${f.numericField}",\n      "percentage_diff": {\n        "$multiply": [ { "$divide": [ { "$abs": { "$subtract": [ "$${f.numericField}", "$dest_join.${f.numericField}" ] } }, "$dest_join.${f.numericField}" ] }, 100 ]\n      }\n    }\n  },\n  { "$match": { "percentage_diff": { "$gt": ${f.tolerance} } } }\n]);`;
+    }
+    default: return `// Validación no implementada para MongoDB: ${key}`;
+  }
+}
+
+// Generate overall script based on checked validations
+function generateScript(){
+  const f = getFormValues();
+  if(!f.project||!f.dataset||!f.src){ alert('Los campos de proyecto/BD, dataset/schema y tabla/colección son obligatorios.'); return; }
 
   const checked = Array.from(document.querySelectorAll('input.form-check-input:checked')).map(ch=>ch.dataset.key);
   if(checked.length===0){ document.getElementById('sqlArea').textContent='-- Ninguna validación seleccionada.'; return; }
 
-  const header = `-- Validaciones generadas\n-- Proyecto: ${project}\n-- Dataset: ${dataset}\n-- Tabla fuente: ${src}\n-- Fecha: ${new Date().toISOString()}\n\n`;
+  const header = `-- =============================================\n-- Validaciones generadas para: ${f.engine.toUpperCase()}\n-- Proyecto/BD: ${f.project}\n-- Dataset/Schema: ${f.dataset}\n-- Tabla/Colección: ${f.src}\n-- Fecha: ${new Date().toISOString()}\n-- =============================================\n\n`;
   const sections = [];
   checked.forEach(k=>{
-    const sql = buildSQLForValidation(k);
+    const script = buildQueryForValidation(k);
     const v = VALIDATIONS.find(x=>x.key===k);
-    if(sql){
-      sections.push(`-- === ${v.title} ===\n-- ${v.desc}\n${sql}\n`);
+    if(script){
+      sections.push(`-- === ${v.title} ===\n-- ${v.desc}\n${script}\n`);
     }
   });
   document.getElementById('sqlArea').textContent = header + sections.join('\n');
@@ -590,6 +823,37 @@ function clearOutput(){ document.getElementById('sqlArea').textContent='-- Aquí
 // Initial: check items that were default-checked
 renderValidationList();
 
+// --- DYNAMIC UI based on DB Engine ---
+const dbEngineSelect = document.getElementById('dbEngine');
+const projectLabel = document.getElementById('projectLabel');
+const datasetLabel = document.getElementById('datasetLabel');
+const projectInput = document.getElementById('project');
+
+dbEngineSelect.addEventListener('change', (e) => {
+  const engine = e.target.value;
+  switch (engine) {
+    case 'bigquery':
+      projectLabel.textContent = 'Proyecto (GCP)';
+      datasetLabel.textContent = 'Dataset';
+      projectInput.placeholder = 'mi-proyecto-gcp';
+      projectInput.disabled = false;
+      break;
+    case 'postgres':
+    case 'sqlserver':
+    case 'mysql':
+      projectLabel.textContent = 'Base de Datos';
+      datasetLabel.textContent = 'Schema (opcional)';
+      projectInput.placeholder = 'mi_base_de_datos';
+      projectInput.disabled = false;
+      break;
+    case 'mongodb':
+      projectLabel.textContent = 'Base de Datos';
+      datasetLabel.textContent = 'Colección';
+      projectInput.placeholder = 'mi_mongo_db';
+      projectInput.disabled = false;
+      break;
+  }
+});
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
